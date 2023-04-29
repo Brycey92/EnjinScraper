@@ -32,29 +32,63 @@ export async function startNotifier(database: Database, domain: string, apiKey: 
             });
     });
 
-    let userCount = [0];
-    const rateLimits: { 
-        [authId: number]: Date | undefined
-    } = Object.fromEntries(siteAuths.map((_, i) => [i, undefined]));
+    // let userCount = [0];
+    // const rateLimits: { 
+    //     [authId: number]: Date | undefined
+    // } = Object.fromEntries(siteAuths.map((_, i) => [i, undefined]));
 
-    const findNextAuth = () => {
-        const authIds = Object.keys(rateLimits).map(id => parseInt(id));
+    let userCount = [0];
+    interface RateLimit {
+        authId: number;
+        date?: Date;
+    };
+    var rateLimits:RateLimit[] = [];
+    for (let i = 0; i < siteAuths.length; i++) {
+        let authId = i;
+        rateLimits.push({authId});
+    }
+
+    var findNextAuth:number = () => {
+        //const authIds = Object.keys(rateLimits).map(id => parseInt(id));
+        var authIds:number[] = [];
+        for (let i = 0; i < rateLimits.length; i++) {
+            authIds.push(rateLimits[i].authId);
+        }
         
+        
+        var authsWithoutRateLimit:number[] = [];
+        var authsWithRateLimit:number[] = [];
+        for (let i = 0; i < authIds.length; i++) {
+            if(typeof rateLimits[i].date === 'undefined') {
+                authsWithoutRateLimit.push(i);
+            } else {
+                authsWithRateLimit.push(i);
+            }
+        }
         // Return the first auth without a rate-limit
-        const authsWithoutRateLimit = authIds.filter(id => !rateLimits[id]);
         if (authsWithoutRateLimit.length > 0) {
-            return authsWithoutRateLimit[0];
+            return authsWithoutRateLimit[0]!;
+        }
+        var minRateLimit = rateLimits[authsWithRateLimit[0]].date!.valueOf();
+        for (let i = 0; i < authsWithRateLimit.length; i++) {
+            let curRateLimit = rateLimits[authsWithRateLimit[i]].date!.valueOf();
+            if (curRateLimit < minRateLimit) {
+                minRateLimit = curRateLimit;
+            }
         }
         
         // Return the auth with the closest rate-limit to now
-        const authsWithRateLimit = authIds.filter(id => rateLimits[id]);
-        const nextRateLimit = Math.min(...authsWithRateLimit.map(id => rateLimits[id]!.getTime()));
-        return authsWithRateLimit.find(id => rateLimits[id]!.getTime() === nextRateLimit)!;
+        statusMessage(MessageType.Info, `Finding auth with rate limit at '${minRateLimit}'...`);
+        for (let i = 0; i < authsWithRateLimit.length; i++) {
+            if (rateLimits[authsWithRateLimit[i]].date!.valueOf() === minRateLimit) {
+                return rateLimits[authsWithRateLimit[i]].authId!;
+            }
+        }
     }
 
     if (fileExists('./target/recovery/notifier_progress.json')) {
         statusMessage(MessageType.Info, 'Recovering notifier progress from previous session...')
-        const progress = parseJsonFile('./target/recovery/notifier_progress.json') as [number[]];
+        var progress = parseJsonFile('./target/recovery/notifier_progress.json') as [number[]];
         userCount = progress[0];
     }
 
@@ -68,10 +102,12 @@ export async function startNotifier(database: Database, domain: string, apiKey: 
         
         // Select the next auth with the lowest rate or no rate-limit
         const authId = findNextAuth();
-        statusMessage(MessageType.Process, `Selecting Auth ${authId} with rate-limit '${rateLimits[authId] ? rateLimits[authId]!.getTime() : 'none'}'...`);
+        statusMessage(MessageType.Process, `Current time: '${Date.now()}'...`);
+        statusMessage(MessageType.Process, `Auth rate-limit time: '${rateLimits[authId] ? rateLimits[authId]!.valueOf() : 'none'}'...`);
+        statusMessage(MessageType.Process, `Selecting Auth ${authId} with rate-limit ms of '${rateLimits[authId] ? rateLimits[authId]!.valueOf() - Date.now() : 'none'}'...`);
 
         // Sleep if the auth has a rate-limit
-        const delay = rateLimits[authId] ? Math.max(rateLimits[authId]!.getTime() - Date.now(), 0) : 0;
+        const delay = rateLimits[authId] ? Math.max(rateLimits[authId]!.valueOf() - Date.now(), 0) : 0;
         if (delay > 0) {
             statusMessage(MessageType.Process, `Waiting ${delay / 1000} seconds before sending next message...`);
             await new Promise<void>(resolve => setTimeout(() => resolve(), delay));
@@ -130,7 +166,9 @@ export async function startNotifier(database: Database, domain: string, apiKey: 
                     statusMessage(MessageType.Process, `Auth ${authId} rate-limited for the day. Setting a 1-hour cooldown. Trying ${users[i].user_id} ${users[i].username} again...`);
 
                     // Add the rate-limit to the auth
-                    rateLimits[authId] = new Date(Date.now() + 60 * 60 * 1000);
+                    statusMessage(MessageType.Info, `Now: '${Date.now()}'`);
+                    rateLimits[authId] = new Date(Date.now() + (60 * 60 * 1000));
+                    statusMessage(MessageType.Info, `Rate limit until: '${rateLimits[authId]!.valueOf()}'`);
 
                     // Retry the user.
                     i--;
