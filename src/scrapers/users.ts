@@ -121,6 +121,7 @@ export async function getAdditionalUserData(domain: string, sessionID: string, s
                             for (const character of characters[gameRid]) {
                                 charactersDB.push([
                                     character.character_id,
+                                    userIDs[i],
                                     gameRid,
                                     character.name,
                                     character.gender,

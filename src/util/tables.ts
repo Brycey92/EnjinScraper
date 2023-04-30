@@ -675,6 +675,7 @@ export const tableSchemas: TableSchema[] = [
         name: 'user_characters',
         schema: [
             'character_id TEXT PRIMARY KEY',
+            'user_id TEXT',// REFERENCES users(user_id)',
             'rid TEXT',
             'name TEXT',
             'gender TEXT',
